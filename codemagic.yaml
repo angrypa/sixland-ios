@@ -3,17 +3,15 @@ workflows:
     name: 六岛 iOS（未签名 ipa）
     instance_type: mac_mini_m2
     max_build_duration: 60
+    environment:
+      vars:
+        IOS_ZIP_URL: https://github.com/angrypa/sixland-ios/releases/download/v1.0.0/sixland_ios_xcode.zip
     triggering:
       events: []
     scripts:
       - name: 取 Xcode 工程
         script: |
           set -e
-          if [ -z "${IOS_ZIP_URL:-}" ]; then
-            echo "没配 IOS_ZIP_URL 环境变量（Codemagic 应用设置 → Environment variables）"
-            exit 2
-          fi
-          echo "下载：$IOS_ZIP_URL"
           curl -L --retry 3 --retry-delay 5 "$IOS_ZIP_URL" -o ios.zip
           ls -lh ios.zip
           unzip -q ios.zip -d ios
@@ -24,21 +22,15 @@ workflows:
         script: |
           set -e
           PROJ=$(find ios -maxdepth 4 -name "Unity-iPhone.xcodeproj" | head -1)
-          [ -n "$PROJ" ] || { echo "上一步没找到 xcodeproj"; exit 3; }
           DIR=$(dirname "$PROJ")
           OUT="$CM_BUILD_DIR/build"
-          mkdir -p "$OUT"
-          cd "$DIR"
-          xcodebuild -version
-          echo "工程目录：$(pwd)"
+          mkdir -p "$OUT"; cd "$DIR"
           xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -archivePath "$OUT/Unity-iPhone.xcarchive" archive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS=""
           APP="$OUT/Unity-iPhone.xcarchive/Products/Applications/Unity-iPhone.app"
-          [ -d "$APP" ] || { echo "archive 里没有 Unity-iPhone.app"; exit 4; }
-          rm -rf "$OUT/Payload"; mkdir -p "$OUT/Payload"
-          cp -R "$APP" "$OUT/Payload/"
+          mkdir -p "$OUT/Payload"; cp -R "$APP" "$OUT/Payload/"
           cd "$OUT" && zip -qry sixland-unsigned.ipa Payload && rm -rf Payload
           ls -lh "$OUT/sixland-unsigned.ipa"
     artifacts:
