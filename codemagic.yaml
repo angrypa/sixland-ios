@@ -17,10 +17,7 @@ workflows:
     max_build_duration: 60
     environment:
       vars:
-        # 走签名构建时才需要下面三项（未签名构建留空即可）
-        # TEAM_ID: ABCDE12345
-        # SIGN_IDENTITY: "Apple Distribution: Your Name (ABCDE12345)"
-        # PROVISIONING_PROFILE_SPECIFIER: "六岛 AdHoc"
+
     triggering:
       events: []
     scripts:
