@@ -1,9 +1,3 @@
-# 六岛 iOS：把 Windows 上 Unity 导出的 Xcode 工程（zip 放直链）在云端 mac 上打成未签名 ipa
-# 产物：Artifacts 里的 build/sixland-unsigned.ipa
-#
-# 关键点：Windows 上（.NET ZipFile）建的 zip 里是**反斜杠**路径，macOS 的 unzip 会解出
-# 一堆带 "\" 的文件名并退出 1（日志里 "appears to use backslashes as path separators"）。
-# 所以解压这一步用 python3 把 '\' 规范成 '/' 自己解，不依赖 unzip/ditto 的行为。
 workflows:
   ios-ipa:
     name: 六岛 iOS（未签名 ipa）
@@ -60,11 +54,16 @@ workflows:
           xcodebuild -quiet -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -archivePath "$OUT/Unity-iPhone.xcarchive" archive \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS=""
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS="" \
+            || { echo "xcodebuild archive 失败（看上面输出的 error）"; exit 5; }
           echo "=== $(date '+%H:%M:%S') archive 完成 ==="
-          APP="$OUT/Unity-iPhone.xcarchive/Products/Applications/Unity-iPhone.app"
-          [ -d "$APP" ] || { echo "archive 里没有 Unity-iPhone.app"; exit 4; }
-          mkdir -p "$OUT/Payload"; cp -R "$APP" "$OUT/Payload/"
+          APPDIR="$OUT/Unity-iPhone.xcarchive/Products/Applications"
+          ls -la "$APPDIR" || true
+          APP=$(find "$APPDIR" -maxdepth 1 -name "*.app" | head -1)
+          echo "app=$APP"
+          [ -n "$APP" ] || { echo "archive 的 Products/Applications 里没有任何 .app"; exit 4; }
+          mkdir -p "$OUT/Payload"
+          cp -R "$APP" "$OUT/Payload/"
           cd "$OUT" && zip -qry sixland-unsigned.ipa Payload && rm -rf Payload
           ls -lh "$OUT/sixland-unsigned.ipa"
           echo "=== $(date '+%H:%M:%S') 全部完成 ==="
