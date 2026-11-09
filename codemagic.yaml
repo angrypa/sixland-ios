@@ -1,3 +1,9 @@
+# 六岛 iOS：把 Windows 上 Unity 导出的 Xcode 工程（zip 放直链）在云端 mac 上打成未签名 ipa
+# 产物：Artifacts 里的 build/sixland-unsigned.ipa
+#
+# 关键点：Windows 上（.NET ZipFile）建的 zip 里是**反斜杠**路径，macOS 的 unzip 会解出
+# 一堆带 "\" 的文件名并退出 1（日志里 "appears to use backslashes as path separators"）。
+# 所以解压这一步用 python3 把 '\' 规范成 '/' 自己解，不依赖 unzip/ditto 的行为。
 workflows:
   ios-ipa:
     name: 六岛 iOS（未签名 ipa）
@@ -12,16 +18,36 @@ workflows:
       - name: 取 Xcode 工程
         script: |
           set -e
-          echo "=== $(date '+%H:%M:%S') 开始下载 ==="
+          echo "=== $(date '+%H:%M:%S') 下载 ==="
           curl -L --fail --connect-timeout 30 --max-time 900 --retry 3 --retry-delay 5 \
             "$IOS_ZIP_URL" -o ios.zip
           ls -lh ios.zip
-          echo "=== $(date '+%H:%M:%S') 开始解压 ==="
-          unzip -q ios.zip -d ios
+          echo "=== $(date '+%H:%M:%S') 解压（反斜杠规范化）==="
+          python3 - <<'PY'
+          import os, re, shutil, zipfile
+          shutil.rmtree('ios', ignore_errors=True)
+          os.makedirs('ios', exist_ok=True)
+          count = 0
+          with zipfile.ZipFile('ios.zip') as z:
+              for info in z.infolist():
+                  name = info.filename.replace('\\', '/')
+                  name = re.sub(r'^(\./|/)+', '', name)
+                  if not name or name == '.':
+                      continue
+                  target = os.path.join('ios', name)
+                  if name.endswith('/'):
+                      os.makedirs(target, exist_ok=True)
+                      continue
+                  os.makedirs(os.path.dirname(target) or 'ios', exist_ok=True)
+                  with z.open(info) as src, open(target, 'wb') as dst:
+                      shutil.copyfileobj(src, dst)
+                  count += 1
+          print('extracted files:', count)
+          PY
+          find ios -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
           PROJ=$(find ios -maxdepth 4 -name "Unity-iPhone.xcodeproj" | head -1)
           echo "xcodeproj=$PROJ"
-          [ -n "$PROJ" ] || { echo "zip 里没找到 Unity-iPhone.xcodeproj"; exit 3; }
-          du -sh ios 2>/dev/null || true
+          [ -n "$PROJ" ] || { echo "没找到 Unity-iPhone.xcodeproj（解压后的目录结构不对）"; ls -la ios | head -20; exit 3; }
       - name: 打未签名 ipa
         script: |
           set -e
@@ -30,7 +56,7 @@ workflows:
           OUT="$CM_BUILD_DIR/build"
           mkdir -p "$OUT"; cd "$DIR"
           xcodebuild -version
-          echo "=== $(date '+%H:%M:%S') 开始 archive（这步最慢，20~40 分钟属正常）==="
+          echo "=== $(date '+%H:%M:%S') 开始 archive（最慢，20~40 分钟属正常）==="
           xcodebuild -quiet -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -archivePath "$OUT/Unity-iPhone.xcarchive" archive \
@@ -44,10 +70,3 @@ workflows:
           echo "=== $(date '+%H:%M:%S') 全部完成 ==="
     artifacts:
       - build/sixland-unsigned.ipa
-    publishing:
-      email:
-        recipients:
-          - 你的邮箱@example.com
-        notify:
-          success: true
-          failure: true
