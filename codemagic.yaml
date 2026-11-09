@@ -1,23 +1,8 @@
-# Codemagic 配置：把 Unity 导出的 Xcode 工程（zip 放任意可直链下载的地址）打成 **未签名 ipa**
-# ---------------------------------------------------------------
-# 为什么不在云上跑 Unity：云 macOS 跑 Unity 要许可证、还要装 iOS 模块，一次 20~40 分钟；
-# 而 Windows 上已经导出好 Xcode 工程，云上只需要 `xcodebuild` 几分钟。
-#
-# 仓库里必须有：codemagic.yaml（本文件）、Tools/build-ios-ipa.sh
-# Codemagic 应用的环境变量里必须有：IOS_ZIP_URL = 那份 Build/iOS 的 zip 直链
-#
-# 产物：Artifacts 里的 build/sixland-unsigned.ipa
-#
-# 要**已签名**的 ipa：配好 iOS 签名，并在下面 environment 里取消注释 TEAM_ID / SIGN_IDENTITY /
-# PROVISIONING_PROFILE_SPECIFIER（或在 Codemagic 环境变量里配同名变量）。
 workflows:
   ios-ipa:
     name: 六岛 iOS（未签名 ipa）
     instance_type: mac_mini_m2
     max_build_duration: 60
-    environment:
-      vars:
-
     triggering:
       events: []
     scripts:
@@ -35,13 +20,26 @@ workflows:
           PROJ=$(find ios -maxdepth 4 -name "Unity-iPhone.xcodeproj" | head -1)
           echo "xcodeproj=$PROJ"
           [ -n "$PROJ" ] || { echo "zip 里没找到 Unity-iPhone.xcodeproj"; exit 3; }
-      - name: 打 ipa
+      - name: 打未签名 ipa
         script: |
           set -e
           PROJ=$(find ios -maxdepth 4 -name "Unity-iPhone.xcodeproj" | head -1)
-          chmod +x Tools/build-ios-ipa.sh
-          ./Tools/build-ios-ipa.sh "$(dirname "$PROJ")" build
+          [ -n "$PROJ" ] || { echo "上一步没找到 xcodeproj"; exit 3; }
+          DIR=$(dirname "$PROJ")
+          OUT="$CM_BUILD_DIR/build"
+          mkdir -p "$OUT"
+          cd "$DIR"
+          xcodebuild -version
+          echo "工程目录：$(pwd)"
+          xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath "$OUT/Unity-iPhone.xcarchive" archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS=""
+          APP="$OUT/Unity-iPhone.xcarchive/Products/Applications/Unity-iPhone.app"
+          [ -d "$APP" ] || { echo "archive 里没有 Unity-iPhone.app"; exit 4; }
+          rm -rf "$OUT/Payload"; mkdir -p "$OUT/Payload"
+          cp -R "$APP" "$OUT/Payload/"
+          cd "$OUT" && zip -qry sixland-unsigned.ipa Payload && rm -rf Payload
+          ls -lh "$OUT/sixland-unsigned.ipa"
     artifacts:
-      - build/*.ipa
-      - build/signed/*.ipa
-      - build/Unity-iPhone.xcarchive
+      - build/sixland-unsigned.ipa
