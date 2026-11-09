@@ -2,7 +2,7 @@ workflows:
   ios-ipa:
     name: 六岛 iOS（未签名 ipa）
     instance_type: mac_mini_m2
-    max_build_duration: 60
+    max_build_duration: 120
     environment:
       vars:
         IOS_ZIP_URL: https://github.com/angrypa/sixland-ios/releases/download/v1.0.0/sixland_ios_xcode.zip
@@ -12,12 +12,16 @@ workflows:
       - name: 取 Xcode 工程
         script: |
           set -e
-          curl -L --retry 3 --retry-delay 5 "$IOS_ZIP_URL" -o ios.zip
+          echo "=== $(date '+%H:%M:%S') 开始下载 ==="
+          curl -L --fail --connect-timeout 30 --max-time 900 --retry 3 --retry-delay 5 \
+            "$IOS_ZIP_URL" -o ios.zip
           ls -lh ios.zip
+          echo "=== $(date '+%H:%M:%S') 开始解压 ==="
           unzip -q ios.zip -d ios
           PROJ=$(find ios -maxdepth 4 -name "Unity-iPhone.xcodeproj" | head -1)
           echo "xcodeproj=$PROJ"
           [ -n "$PROJ" ] || { echo "zip 里没找到 Unity-iPhone.xcodeproj"; exit 3; }
+          du -sh ios 2>/dev/null || true
       - name: 打未签名 ipa
         script: |
           set -e
@@ -25,13 +29,25 @@ workflows:
           DIR=$(dirname "$PROJ")
           OUT="$CM_BUILD_DIR/build"
           mkdir -p "$OUT"; cd "$DIR"
-          xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
+          xcodebuild -version
+          echo "=== $(date '+%H:%M:%S') 开始 archive（这步最慢，20~40 分钟属正常）==="
+          xcodebuild -quiet -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -archivePath "$OUT/Unity-iPhone.xcarchive" archive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS=""
+          echo "=== $(date '+%H:%M:%S') archive 完成 ==="
           APP="$OUT/Unity-iPhone.xcarchive/Products/Applications/Unity-iPhone.app"
+          [ -d "$APP" ] || { echo "archive 里没有 Unity-iPhone.app"; exit 4; }
           mkdir -p "$OUT/Payload"; cp -R "$APP" "$OUT/Payload/"
           cd "$OUT" && zip -qry sixland-unsigned.ipa Payload && rm -rf Payload
           ls -lh "$OUT/sixland-unsigned.ipa"
+          echo "=== $(date '+%H:%M:%S') 全部完成 ==="
     artifacts:
       - build/sixland-unsigned.ipa
+    publishing:
+      email:
+        recipients:
+          - 你的邮箱@example.com
+        notify:
+          success: true
+          failure: true
